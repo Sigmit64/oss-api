@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://oss-funder.example/contracts/modules/module-invocation.v1.schema.json",
+  "title": "OSS-Funder module invocation payload",
+  "description": "Current implementation contract for the synchronous HTTP JSON request sent by the backend to a registered module. The payload is {manifest, archive_url?}; archive_url is present when archive or both delivery was registered.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["manifest"],
+  "properties": {
+    "manifest": { "$ref": "#/$defs/manifest" },
+    "archive_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "Present for archive/both delivery. It points to the backend tar.gz download endpoint."
+    }
+  },
+  "$defs": {
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contract_version", "run_id", "repository_id", "canonical_url", "commit_sha", "language_evidence", "files", "artifact_download_url", "callback_context"],
+      "properties": {
+        "contract_version": { "const": "1" },
+        "run_id": { "type": "string", "format": "uuid" },
+        "repository_id": { "type": "string", "format": "uuid" },
+        "canonical_url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://github\\.com/(?!\\.\\.?/)[A-Za-z0-9._-]+/(?!\\.\\.?$)[A-Za-z0-9._-]+$",
+          "description": "V1 current-output shape for a public GitHub HTTPS repository URL: exactly https://github.com/<owner>/<repository>, with owner and repository characters limited to ASCII letters, digits, dot, underscore, and hyphen, and with no trailing slash, query, fragment, or additional path. Normal canonical output has no .git suffix. The current backend strips only one .git suffix, so a repeated suffix can produce and must remain schema-compatible with a repository segment ending in .git until backend hardening rejects it. Private repositories and other providers require a future contract version with an explicit credential/reference mechanism."
+        },
+        "commit_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+        "language_evidence": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 0 }
+        },
+        "files": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/manifest_file" }
+        },
+        "artifact_download_url": {
+          "type": ["string", "null"],
+          "format": "uri"
+        },
+        "callback_context": {
+          "type": "object",
+          "description": "V1 is always an empty object sent by the backend. Modules must treat this field as opaque, ignore unknown fields, and must not require or echo secrets. A future contract may use it for short-lived upload sessions, callback credentials, or submission addresses; V1 does not define or implement those fields.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "manifest_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "role", "language", "size", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*(?:^|/)\\.(?:/|$)).+$",
+          "description": "Safe repository-relative POSIX path; no leading slash, backslash, empty path, . or .. path component."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["license", "manifest", "lockfile", "source", "test", "documentation", "configuration", "other"]
+        },
+        "language": { "type": ["string", "null"] },
+        "size": { "type": "integer", "minimum": 0 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    }
+  }
+}

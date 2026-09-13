@@ -1,0 +1,25 @@
+{
+  "name": "oss-funder-api-docs",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OSS-Funder API documentation site",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "sync-specs": "node scripts/sync-specs.mjs",
+    "validate-specs": "node scripts/validate-specs.mjs",
+    "build": "vite build",
+    "test:site": "node scripts/check-site.mjs",
+    "check": "npm run validate-specs && npm run build && npm run test:site"
+  },
+  "dependencies": {
+    "swagger-ui-dist": "^5.29.0"
+  },
+  "devDependencies": {
+    "@apidevtools/swagger-parser": "^12.0.0",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "vite": "^7.1.5",
+    "yaml": "^2.8.1"
+  }
+}
