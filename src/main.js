@@ -10,6 +10,4 @@ SwaggerUI({
   defaultModelsExpandDepth: 1,
   displayRequestDuration: true,
   filter: true,
-  persistAuthorization: false,
-  tryItOutEnabled: false,
 });

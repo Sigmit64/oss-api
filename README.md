@@ -28,7 +28,7 @@ npm run validate-specs
 
 `.github/workflows/pages.yml` 在 `main` 推送或手动触发时运行校验、构建并部署。工作流使用项目 Pages 兼容的相对资源路径，并只申请 `contents: read`、`pages: write`、`id-token: write` 权限。仓库设置中的 Pages Source 需要选择 **GitHub Actions**。
 
-页面会明确区分：
+页面直接呈现接近原生的 Swagger UI；模块 Schema 作为静态契约资源随站点发布，状态如下：
 
 - `CURRENT`：当前后端已经实现的 OpenAPI 接口。
 - `module-invocation.v1.schema.json`：`CURRENT`，当前实现使用的模块调用输入契约。

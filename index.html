@@ -3,82 +3,11 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="OSS-Funder HTTP API 接口说明与模块契约" />
+    <meta name="description" content="OSS-Funder HTTP API 接口说明" />
     <title>OSS-Funder API 文档</title>
   </head>
   <body>
-    <header class="site-header">
-      <div class="header-inner">
-        <a class="brand" href="./">OSS-Funder <span>API 文档</span></a>
-        <a class="header-link" href="./specs/oss-funder-current-v1.yaml" download>契约文件</a>
-      </div>
-    </header>
-
-    <main>
-      <section class="hero">
-        <div class="hero-copy">
-          <p class="eyebrow">公开接口参考 · v1</p>
-          <h1>把代码仓库分析能力接入你的工具链</h1>
-          <p class="hero-text">
-            这里是 OSS-Funder 后端当前实现的 HTTP API 参考。接口采用异步任务模型，
-            可创建仓库、查看清单、注册模块并跟踪运行状态。
-          </p>
-          <div class="status-row">
-            <span class="status-pill current">CURRENT · 已实现</span>
-            <a class="raw-link" href="./specs/oss-funder-current-v1.yaml" download>下载 OpenAPI YAML</a>
-          </div>
-        </div>
-        <div class="hero-note">
-          <strong>阅读提示</strong>
-          <p>下方 Swagger UI 可展开每个接口，查看参数、响应和可直接复制的请求示例。</p>
-          <p class="muted">服务默认监听 <code>http://127.0.0.1:8080</code>；部署环境请按实际地址配置。</p>
-        </div>
-      </section>
-
-      <section class="contract-grid" aria-label="契约资源">
-        <article class="contract-card current-card" data-contract="http-api" data-status="current">
-          <div class="card-heading"><span class="status-pill current">CURRENT</span><span>HTTP API</span></div>
-          <h2>当前实现接口</h2>
-          <p>Rust/Axum 后端已经提供的健康检查、仓库、模块、运行和事件接口。</p>
-          <a href="#http-api">查看接口列表 <span aria-hidden="true">↓</span></a>
-        </article>
-        <article class="contract-card current-card schema-card" data-contract="module-invocation" data-status="current">
-          <div class="card-heading"><span class="status-pill current">CURRENT</span><span>模块契约</span></div>
-          <h2>模块调用 v1</h2>
-          <p>后端发给已注册模块的同步 HTTP JSON 输入，当前实现已经使用。</p>
-          <a href="./specs/modules/module-invocation.v1.schema.json" download>下载 Schema</a>
-        </article>
-        <article class="contract-card target-card schema-card" data-contract="module-registration" data-status="target">
-          <div class="card-heading"><span class="status-pill target">TARGET</span><span>实现待跟进</span></div>
-          <h2>模块注册 v1</h2>
-          <p>已冻结的注册形状；选择器交叉规则仍属于后端待实现约束。</p>
-          <a href="./specs/modules/module-registration.v1.schema.json" download>下载 Schema</a>
-        </article>
-        <article class="contract-card target-card schema-card" data-contract="module-result" data-status="target">
-          <div class="card-heading"><span class="status-pill target">TARGET</span><span>实现待跟进</span></div>
-          <h2>模块结果 v1</h2>
-          <p>已批准的结果信封；当前后端尚未校验或解释该 Schema。</p>
-          <a href="./specs/modules/module-result.v1.schema.json" download>下载 Schema</a>
-        </article>
-      </section>
-
-      <section class="api-section" id="http-api">
-        <div class="section-heading">
-          <div>
-            <p class="eyebrow">OpenAPI 3.0.3</p>
-            <h2>HTTP API 接口</h2>
-          </div>
-          <span class="section-label">CURRENT · 当前实现</span>
-        </div>
-        <div id="swagger-ui" aria-label="Swagger API 文档"></div>
-      </section>
-    </main>
-
-    <footer class="site-footer">
-      <p>OSS-Funder API 文档 · 契约文件随站点版本发布</p>
-      <a href="./specs/oss-funder-current-v1.yaml" download aria-label="下载 OpenAPI 契约">契约文件</a>
-    </footer>
-
+    <div id="swagger-ui"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

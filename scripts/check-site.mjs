@@ -6,6 +6,13 @@ const dist = resolve(root, 'dist');
 const html = await readFile(resolve(dist, 'index.html'), 'utf8');
 
 if (!html.includes('./assets/')) throw new Error('index.html 未使用可部署的相对资源路径');
+if (!html.includes('<div id="swagger-ui"></div>')) throw new Error('页面缺少原生 Swagger UI 容器');
+for (const deletedElement of ['site-header', 'hero', 'contract-grid', 'site-footer']) {
+  if (html.includes(deletedElement)) throw new Error(`页面仍包含已删除的装饰元素：${deletedElement}`);
+}
+for (const deletedText of ['CURRENT', 'TARGET', '把代码仓库分析能力接入你的工具链', '阅读提示']) {
+  if (html.includes(deletedText)) throw new Error(`页面仍包含已删除的宣传文字：${deletedText}`);
+}
 for (const path of [
   'specs/oss-funder-current-v1.yaml',
   'specs/modules/module-registration.v1.schema.json',
@@ -15,15 +22,8 @@ for (const path of [
   await access(resolve(dist, path));
 }
 const assets = await readdir(resolve(dist, 'assets'));
-if (!assets.some((file) => file.endsWith('.js'))) throw new Error('构建结果缺少 JavaScript 资源');
-if (!html.includes('CURRENT') || !html.includes('TARGET')) throw new Error('页面缺少 current/target 状态标签');
-if (html.includes('https://github.com/')) throw new Error('页面仍包含未配置仓库地址的 GitHub 占位链接');
-for (const [contract, status] of [
-  ['module-invocation', 'current'],
-  ['module-registration', 'target'],
-  ['module-result', 'target'],
-]) {
-  const marker = `data-contract="${contract}" data-status="${status}"`;
-  if (!html.includes(marker)) throw new Error(`契约状态标注错误或缺失：${contract}=${status}`);
-}
+const jsFiles = assets.filter((file) => file.endsWith('.js'));
+if (jsFiles.length === 0) throw new Error('构建结果缺少 JavaScript 资源');
+const js = await readFile(resolve(dist, 'assets', jsFiles[0]), 'utf8');
+if (!js.includes('./specs/oss-funder-current-v1.yaml')) throw new Error('Swagger UI 未配置随站发布的 OpenAPI 契约');
 console.log(`静态站冒烟检查通过：${assets.length} 个资源，契约文件已包含`);
