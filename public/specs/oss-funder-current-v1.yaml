@@ -13,6 +13,7 @@ servers:
   - url: http://127.0.0.1:8080
     description: Default local backend
 tags:
+  - name: projects
   - name: health
   - name: repositories
   - name: modules
@@ -37,7 +38,88 @@ paths:
                 properties:
                   status: { type: string, example: ok }
                   service: { type: string, example: oss-funder-backend }
+  /api/v1/projects:
+    get:
+      tags: [projects]
+      summary: List projects
+      responses:
+        '200':
+          description: Projects ordered by creation time
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Project' } } } }
+    post:
+      tags: [projects]
+      summary: Create an active project
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProjectCreateRequest' } } }
+      responses:
+        '201':
+          description: Created project
+          content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+  /api/v1/projects/{project_id}:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [projects]
+      summary: Get project and repository counters
+      responses:
+        '200': { description: Project details, content: { application/json: { schema: { $ref: '#/components/schemas/ProjectDetails' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [projects]
+      summary: Update project with optimistic version check
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ProjectUpdateRequest' } } }
+      responses:
+        '200': { description: Updated project, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{project_id}/runs:
+    get:
+      tags: [runs, projects]
+      summary: List runs belonging to a project
+      responses:
+        '200': { description: Runs, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Run' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{project_id}/analyses:
+    get:
+      tags: [projects]
+      summary: List project analyses
+      responses:
+        '200': { description: Analyses, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Analysis' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [projects]
+      summary: Create one analysis for multiple repositories
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AnalysisCreateRequest' } } }
+      responses:
+        '202':
+          description: Analysis and all target runs accepted
+          headers:
+            Location: { schema: { type: string } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/Analysis' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/v1/projects/{project_id}/analyses/{analysis_id}:
+    get:
+      tags: [projects]
+      summary: Get analysis with explicit target-to-run mappings
+      responses:
+        '200': { description: Analysis details, content: { application/json: { schema: { $ref: '#/components/schemas/Analysis' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/repositories:
+    parameters:
+      - name: project_id
+        in: query
+        required: false
+        schema: { type: string, format: uuid }
     get:
       tags: [repositories]
       summary: List repositories
@@ -49,6 +131,7 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/Repository' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
     post:
       tags: [repositories]
@@ -65,6 +148,8 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RepositoryAccepted' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/repositories/{repository_id}:
     parameters:
@@ -86,6 +171,7 @@ paths:
       responses:
         '204': { description: 'Deleted, no response body' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/repositories/{repository_id}/refresh:
     parameters:
@@ -104,6 +190,7 @@ paths:
                 properties:
                   job_id: { type: string, format: uuid }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/repositories/{repository_id}/inventory:
     parameters:
@@ -150,6 +237,7 @@ paths:
               schema: { $ref: '#/components/schemas/Run' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/jobs/{job_id}:
     parameters:
@@ -169,6 +257,12 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/events:
+    parameters:
+      - name: project_id
+        in: query
+        required: false
+        description: Only emit events belonging to this project.
+        schema: { type: string, format: uuid }
     get:
       tags: [events]
       summary: Subscribe to live job and run events
@@ -342,6 +436,11 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Conflict:
+      description: Request conflicts with current project or resource state
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     InternalError:
       description: Internal error
       content:
@@ -362,11 +461,87 @@ components:
             message: { type: string }
             details: { nullable: true }
             request_id: { type: string, format: uuid }
+    Project:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, owner, status, version, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+        status: { type: string, enum: [active, archived] }
+        version: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProjectDetails:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, owner, status, version, repository_count, ready_repository_count, analyzed_repository_count, last_analysis_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+        status: { type: string, enum: [active, archived] }
+        version: { type: integer, minimum: 1 }
+        repository_count: { type: integer, minimum: 0 }
+        ready_repository_count: { type: integer, minimum: 0 }
+        analyzed_repository_count: { type: integer, minimum: 0 }
+        last_analysis_at: { type: string, nullable: true, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProjectCreateRequest:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1 }
+        description: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+    ProjectUpdateRequest:
+      type: object
+      required: [version]
+      properties:
+        name: { type: string }
+        description: { type: string, nullable: true }
+        owner: { type: string, nullable: true }
+        status: { type: string, enum: [active, archived] }
+        version: { type: integer, minimum: 1 }
+    AnalysisCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [repository_ids, module_id]
+      properties:
+        repository_ids: { type: array, minItems: 1, items: { type: string, format: uuid } }
+        module_id: { type: string, format: uuid }
+    Analysis:
+      type: object
+      additionalProperties: false
+      required: [id, project_id, module_id, state, progress, targets, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        module_id: { type: string, format: uuid }
+        state: { type: string, enum: [queued, running, completed, failed, partial] }
+        progress: { type: integer, minimum: 0, maximum: 100 }
+        targets: { type: array, items: { $ref: '#/components/schemas/AnalysisTarget' } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AnalysisTarget:
+      type: object
+      required: [repository_id, repository_name, commit_sha, run_id, state]
+      properties:
+        repository_id: { type: string, format: uuid }
+        repository_name: { type: string }
+        commit_sha: { type: string, nullable: true }
+        run_id: { type: string, format: uuid }
+        state: { type: string, enum: [queued, running, completed, failed] }
     RepositoryCreateRequest:
       type: object
       additionalProperties: false
-      required: [url]
+      required: [project_id, url]
       properties:
+        project_id: { type: string, format: uuid }
         url:
           type: string
           format: uri
@@ -388,9 +563,10 @@ components:
         detail exposed by the current API and is expected to be hidden by a
         future public DTO.
       additionalProperties: false
-      required: [id, canonical_url, requested_ref, resolved_sha, state, snapshot_path, description, last_error, created_at, updated_at]
+      required: [id, project_id, canonical_url, requested_ref, resolved_sha, state, snapshot_path, description, last_error, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
         canonical_url: { type: string, format: uri }
         requested_ref: { type: string }
         resolved_sha: { type: string, nullable: true, pattern: '^[0-9a-f]{40}$' }
@@ -438,11 +614,12 @@ components:
     Job:
       type: object
       additionalProperties: false
-      required: [id, kind, repository_id, state, progress, stage, error_code, error_message, created_at, updated_at]
+      required: [id, kind, repository_id, project_id, state, progress, stage, error_code, error_message, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         kind: { type: string, example: clone }
         repository_id: { type: string, nullable: true, format: uuid }
+        project_id: { type: string, nullable: true, format: uuid }
         state: { type: string, enum: [queued, running, completed, failed] }
         progress: { type: integer, minimum: 0, maximum: 100 }
         stage: { type: string }
@@ -515,12 +692,24 @@ components:
     Run:
       type: object
       additionalProperties: false
-      required: [id, run_id, repository_id, module_id, commit_sha, state, selected_files, selected_inputs, artifact_id, artifact_url, response_status, response_headers, response_body, error_code, error_message, duration_ms, created_at, updated_at]
+      required: [id, run_id, project_id, repository_id, module_id, analysis_id, module_snapshot, commit_sha, state, selected_files, selected_inputs, artifact_id, artifact_url, response_status, response_headers, response_body, error_code, error_message, duration_ms, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         run_id: { type: string, format: uuid }
+        project_id: { type: string, nullable: true, format: uuid }
         repository_id: { type: string, format: uuid }
         module_id: { type: string, format: uuid }
+        analysis_id: { type: string, nullable: true, format: uuid }
+        module_snapshot:
+          type: object
+          nullable: true
+          additionalProperties: false
+          required: [name, version, delivery_mode, requirements]
+          properties:
+            name: { type: string }
+            version: { type: string }
+            delivery_mode: { type: string, enum: [manifest, archive, both] }
+            requirements: { $ref: '#/components/schemas/ModuleRequirements' }
         commit_sha: { type: string, nullable: true, pattern: '^[0-9a-f]{40}$' }
         state: { type: string, enum: [queued, running, completed, failed] }
         selected_files: { type: integer, minimum: 0 }
@@ -538,12 +727,14 @@ components:
     Event:
       type: object
       additionalProperties: false
-      required: [event, job_id, repository_id, run_id, state, progress, stage, message]
+      required: [event, job_id, repository_id, project_id, run_id, analysis_id, state, progress, stage, message]
       properties:
         event: { type: string, enum: [job, run] }
         job_id: { type: string, nullable: true, format: uuid }
         repository_id: { type: string, nullable: true, format: uuid }
+        project_id: { type: string, nullable: true, format: uuid }
         run_id: { type: string, nullable: true, format: uuid }
+        analysis_id: { type: string, nullable: true, format: uuid }
         state: { type: string }
         progress: { type: integer, minimum: 0, maximum: 100 }
         stage: { type: string }

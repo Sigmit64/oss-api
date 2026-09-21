@@ -19,13 +19,7 @@ const modules = resolve(sourceRoot, 'modules');
 
 const openapiText = await readFile(openapi, 'utf8');
 await mkdir(resolve(destination, 'modules'), { recursive: true });
-// Keep the published copy valid OpenAPI: an unquoted comma in the source's
-// compact 204 descriptions is parsed by YAML as an extra mapping key.
-const normalizedOpenapi = openapiText.replaceAll(
-  '{ description: Deleted, no response body }',
-  "{ description: 'Deleted, no response body' }",
-);
-await writeFile(resolve(destination, 'oss-funder-current-v1.yaml'), normalizedOpenapi);
+await writeFile(resolve(destination, 'oss-funder-current-v1.yaml'), openapiText);
 for (const filename of ['module-registration.v1.schema.json', 'module-invocation.v1.schema.json', 'module-result.v1.schema.json']) {
   await readFile(resolve(modules, filename));
   await cp(resolve(modules, filename), resolve(destination, 'modules', filename));
