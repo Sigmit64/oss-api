@@ -7,10 +7,11 @@
   "scripts": {
     "dev": "vite",
     "sync-specs": "node scripts/sync-specs.mjs",
+    "check-drift": "node scripts/check-drift.mjs",
     "validate-specs": "node scripts/validate-specs.mjs",
     "build": "vite build",
     "test:site": "node scripts/check-site.mjs",
-    "check": "npm run validate-specs && npm run build && npm run test:site"
+    "check": "npm run check-drift && npm run validate-specs && npm run build && npm run test:site"
   },
   "dependencies": {
     "swagger-ui-dist": "^5.29.0"

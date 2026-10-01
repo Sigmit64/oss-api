@@ -3,15 +3,20 @@ info:
   title: OSS-Funder HTTP API (current implementation)
   version: '1.0.0-current'
   description: >-
-    Current implementation inventory, repository, module and run API. This
-    document is a description of the Rust/Axum routes that exist today, not a
-    promise that proposed Snapshot, Finding, policy or report endpoints exist.
+    Current implementation inventory, repository, module, run, governance and
+    lifecycle API. Project-owned resources require authorization. The default
+    local-development mode is intended only for a loopback bind; trusted
+    integration mode requires an external identity provider to supply a
+    subject and project grants. The backend never treats owner text as an
+    identity and never fabricates notification recipients.
     The backend is asynchronous: clone, inventory and module invocation are
-    started in Tokio tasks. Module responses are currently recorded as bounded
-    text; module-result.v1 is a draft and is not validated yet.
+    started in Tokio tasks. Module responses are validated as module-result.v1
+    before findings and inline output artifacts are persisted.
 servers:
   - url: http://127.0.0.1:8080
     description: Default local backend
+security:
+  - trustedIntegration: []
 tags:
   - name: projects
   - name: health
@@ -24,6 +29,7 @@ tags:
 paths:
   /health:
     get:
+      security: []
       tags: [health]
       summary: Backend health
       responses:
@@ -42,13 +48,15 @@ paths:
     get:
       tags: [projects]
       summary: List projects
+      description: In trusted integration mode this portfolio view requires the wildcard project grant; local development is loopback-only.
       responses:
         '200':
-          description: Projects ordered by creation time
-          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Project' } } } }
+          description: Projects ordered by creation time, including framework-owned counters
+          content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ProjectDetails' } } } }
     post:
       tags: [projects]
       summary: Create an active project
+      description: In trusted integration mode project creation requires the wildcard/platform grant; the owner field is descriptive only.
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/ProjectCreateRequest' } } }
@@ -57,6 +65,20 @@ paths:
           description: Created project
           content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/dashboard/overview:
+    get:
+      tags: [health]
+      summary: Portfolio, project, or repository health overview
+      description: Portfolio overview without project_id requires the wildcard grant in trusted integration mode; project_id scopes the response to that granted project.
+      parameters:
+        - { name: project_id, in: query, required: false, schema: { type: string } }
+        - { name: repository_id, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: Dashboard overview, content: { application/json: { schema: { $ref: '#/components/schemas/DashboardOverview' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
   /api/v1/projects/{project_id}:
     parameters:
       - name: project_id
@@ -78,12 +100,36 @@ paths:
       responses:
         '200': { description: Updated project, content: { application/json: { schema: { $ref: '#/components/schemas/Project' } } } }
         '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
   /api/v1/projects/{project_id}/runs:
     get:
       tags: [runs, projects]
       summary: List runs belonging to a project
       responses:
         '200': { description: Runs, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Run' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/projects/{project_id}/trends:
+    get:
+      tags: [health, projects]
+      summary: Historical health snapshots and vulnerability trend
+      parameters:
+        - { name: project_id, in: path, required: true, schema: { type: string } }
+        - { name: from, in: query, required: true, schema: { type: string, pattern: '^\\d{4}-\\d{2}$' } }
+        - { name: to, in: query, required: true, schema: { type: string, pattern: '^\\d{4}-\\d{2}$' } }
+        - { name: repository_id, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: Inclusive monthly trend, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/HealthTrendPoint' } } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/projects/{project_id}/maintainer-health:
+    get:
+      tags: [health, projects]
+      summary: Maintainer health from typed external reports
+      parameters:
+        - { name: project_id, in: path, required: true, schema: { type: string } }
+        - { name: repository_id, in: query, required: false, schema: { type: string } }
+      responses:
+        '200': { description: Maintainer health, content: { application/json: { schema: { $ref: '#/components/schemas/MaintainerHealth' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/projects/{project_id}/analyses:
     get:
@@ -136,6 +182,12 @@ paths:
     post:
       tags: [repositories]
       summary: Queue a public GitHub repository clone and inventory
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Durable request key. Reusing it with the same request replays the original repository and job response.
+          schema: { type: string, minLength: 1, maxLength: 255 }
       requestBody:
         required: true
         content:
@@ -150,6 +202,7 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
         '500': { $ref: '#/components/responses/InternalError' }
   /api/v1/repositories/{repository_id}:
     parameters:
@@ -173,6 +226,21 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
         '500': { $ref: '#/components/responses/InternalError' }
+    patch:
+      tags: [repositories]
+      summary: Update the local repository note with compare-and-set semantics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RepositoryUpdateRequest' }
+      responses:
+        '200':
+          description: Updated repository
+          content: { application/json: { schema: { $ref: '#/components/schemas/Repository' } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationError' }
   /api/v1/repositories/{repository_id}/refresh:
     parameters:
       - $ref: '#/components/parameters/RepositoryId'
@@ -264,6 +332,8 @@ paths:
         description: Only emit events belonging to this project.
         schema: { type: string, format: uuid }
     get:
+      security:
+        - trustedIntegration: []
       tags: [events]
       summary: Subscribe to live job and run events
       description: >-
@@ -381,7 +451,7 @@ paths:
     get:
       tags: [runs]
       summary: Get module run
-      description: response_body is the bounded string captured from the module; it is not parsed as module-result.v1 today.
+      description: response_body is the redacted, validated module-result.v1 JSON body. Oversized or malformed 2xx responses fail the run and are not stored as arbitrary module output.
       responses:
         '200':
           description: Current run record
@@ -398,10 +468,11 @@ paths:
         schema: { type: string, format: uuid }
     get:
       tags: [artifacts]
-      summary: Download selected module input archive
+      summary: Download a selected module input archive or persisted module output artifact
       description: >-
-        This endpoint downloads a backend-created tar.gz of selected regular
-        files. It is not currently a generic output-artifact download API.
+        Input archives and module output artifacts use separate stores. The
+        returned filename, media type, byte length, and content correspond to
+        the persisted artifact record.
       responses:
         '200':
           description: tar.gz archive
@@ -413,6 +484,70 @@ paths:
               schema: { type: string, format: binary }
         '404': { $ref: '#/components/responses/NotFound' }
         '500': { $ref: '#/components/responses/InternalError' }
+  /api/v1/sboms:
+    get:
+      tags: [sboms]
+      summary: List completed repository SBOM versions or project aggregation
+      parameters:
+        - { name: project_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: scope, in: query, required: false, schema: { type: string, enum: [project, repository] } }
+        - { name: repository_id, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200': { description: SBOM summaries, content: { application/json: { schema: { $ref: '#/components/schemas/SbomListResponse' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/sboms/{sbom_id}:
+    get:
+      tags: [sboms]
+      summary: Get an exact repository SBOM version or project aggregation
+      parameters: [{ name: sbom_id, in: path, required: true, schema: { type: string } }]
+      responses:
+        '200': { description: SBOM, content: { application/json: { schema: { $ref: '#/components/schemas/Sbom' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/sboms/{sbom_id}/export:
+    get:
+      tags: [sboms]
+      summary: Export the selected SBOM
+      parameters:
+        - { name: sbom_id, in: path, required: true, schema: { type: string } }
+        - { name: format, in: query, required: true, schema: { type: string, enum: [cyclonedx, spdx] } }
+      responses:
+        '200': { description: Standards-shaped JSON export, content: { application/json: { schema: { type: object } } } }
+        '422': { $ref: '#/components/responses/ValidationError' }
+  /api/v1/projects/{project_id}/vulnerabilities:
+    get:
+      tags: [governance]
+      summary: List project vulnerability findings and consistent totals
+      parameters:
+        - { name: project_id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: repository_id, in: query, schema: { type: string, format: uuid } }
+        - { name: severity, in: query, schema: { type: string, enum: [critical, high, medium, low] } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, confirmed, in_progress, fixed, false_positive, ignored] } }
+      responses: { '200': { description: Vulnerability list, content: { application/json: { schema: { $ref: '#/components/schemas/VulnerabilityListResponse' } } } } }
+  /api/v1/projects/{project_id}/vulnerabilities/{finding_id}:
+    get:
+      tags: [governance]
+      summary: Get a vulnerability finding and timeline
+      parameters: [{ name: project_id, in: path, required: true, schema: { type: string, format: uuid } }, { name: finding_id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: Vulnerability detail, content: { application/json: { schema: { $ref: '#/components/schemas/VulnerabilityDetail' } } } } }
+  /api/v1/projects/{project_id}/vulnerabilities/{finding_id}/status:
+    patch:
+      tags: [governance]
+      summary: Update vulnerability disposition
+      parameters: [{ name: project_id, in: path, required: true, schema: { type: string, format: uuid } }, { name: finding_id, in: path, required: true, schema: { type: string } }]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [status], properties: { status: { type: string }, reason: { type: string } } } } } }
+      responses: { '200': { description: Updated finding, content: { application/json: { schema: { $ref: '#/components/schemas/VulnerabilityDetail' } } } }, '409': { $ref: '#/components/responses/Conflict' } }
+  /api/v1/projects/{project_id}/licenses:
+    get:
+      tags: [governance]
+      summary: Get license governance findings, coverage and conflicts
+      parameters: [{ name: project_id, in: path, required: true, schema: { type: string, format: uuid } }, { name: repository_id, in: query, schema: { type: string, format: uuid } }]
+      responses: { '200': { description: License governance, content: { application/json: { schema: { $ref: '#/components/schemas/LicenseGovernanceResponse' } } } } }
+  /api/v1/projects/{project_id}/license-conflicts/{conflict_id}/resolution:
+    get:
+      tags: [governance]
+      summary: Get explanatory license conflict recommendations
+      parameters: [{ name: project_id, in: path, required: true, schema: { type: string, format: uuid } }, { name: conflict_id, in: path, required: true, schema: { type: string } }]
+      responses: { '200': { description: License resolution, content: { application/json: { schema: { $ref: '#/components/schemas/LicenseResolution' } } } } }
 components:
   parameters:
     RepositoryId:
@@ -431,8 +566,23 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
+    ValidationError:
+      description: Request fields failed validation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
     NotFound:
       description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Unauthorized:
+      description: External identity is missing or invalid in trusted integration mode
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorResponse' }
+    Forbidden:
+      description: The authenticated subject has no project grant
       content:
         application/json:
           schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -464,7 +614,7 @@ components:
     Project:
       type: object
       additionalProperties: false
-      required: [id, name, description, owner, status, version, created_at, updated_at]
+      required: [id, name, description, owner, status, version, archived_at, scheduled_deletion_at, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -472,12 +622,14 @@ components:
         owner: { type: string, nullable: true }
         status: { type: string, enum: [active, archived] }
         version: { type: integer, minimum: 1 }
+        archived_at: { type: string, nullable: true, format: date-time }
+        scheduled_deletion_at: { type: string, nullable: true, format: date-time }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     ProjectDetails:
       type: object
       additionalProperties: false
-      required: [id, name, description, owner, status, version, repository_count, ready_repository_count, analyzed_repository_count, last_analysis_at, created_at, updated_at]
+      required: [id, name, description, owner, status, version, archived_at, scheduled_deletion_at, repository_count, ready_repository_count, analyzed_repository_count, vulnerability_repository_count, license_repository_count, last_analysis_at, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -485,10 +637,18 @@ components:
         owner: { type: string, nullable: true }
         status: { type: string, enum: [active, archived] }
         version: { type: integer, minimum: 1 }
+        archived_at: { type: string, nullable: true, format: date-time }
+        scheduled_deletion_at: { type: string, nullable: true, format: date-time }
         repository_count: { type: integer, minimum: 0 }
         ready_repository_count: { type: integer, minimum: 0 }
         analyzed_repository_count: { type: integer, minimum: 0 }
-        last_analysis_at: { type: string, nullable: true, format: date-time }
+        vulnerability_repository_count: { type: integer, nullable: true, minimum: 0, description: Business-owned coverage is unavailable until a vulnerability provider is integrated. }
+        license_repository_count: { type: integer, nullable: true, minimum: 0, description: Business-owned coverage is unavailable until a license provider is integrated. }
+        last_analysis_at:
+          type: string
+          nullable: true
+          format: date-time
+          description: Terminal completed/failed/partial analysis or completed/failed/partial run activity; partial_success module results are stored as completed runs with result_status=partial_success. Uses finished_at, then updated_at; null when none exists.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     ProjectCreateRequest:
@@ -517,7 +677,7 @@ components:
     Analysis:
       type: object
       additionalProperties: false
-      required: [id, project_id, module_id, state, progress, targets, created_at, updated_at]
+      required: [id, project_id, module_id, state, progress, targets, repositories, run_ids, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         project_id: { type: string, format: uuid }
@@ -525,6 +685,20 @@ components:
         state: { type: string, enum: [queued, running, completed, failed, partial] }
         progress: { type: integer, minimum: 0, maximum: 100 }
         targets: { type: array, items: { $ref: '#/components/schemas/AnalysisTarget' } }
+        repositories:
+          type: array
+          description: Compatibility projection of analysis targets for frontend consumers.
+          items:
+            type: object
+            required: [repository_id, repository_name, commit_sha]
+            properties:
+              repository_id: { type: string, format: uuid }
+              repository_name: { type: string }
+              commit_sha: { type: string, nullable: true }
+        run_ids:
+          type: array
+          description: Compatibility list of runs created for this analysis.
+          items: { type: string, format: uuid }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     AnalysisTarget:
@@ -563,19 +737,30 @@ components:
         detail exposed by the current API and is expected to be hidden by a
         future public DTO.
       additionalProperties: false
-      required: [id, project_id, canonical_url, requested_ref, resolved_sha, state, snapshot_path, description, last_error, created_at, updated_at]
+      required: [id, project_id, canonical_url, requested_ref, resolved_sha, state, sync_state, active_job_id, latest_job_id, last_successful_sync_at, snapshot_path, description, last_error, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         project_id: { type: string, format: uuid }
         canonical_url: { type: string, format: uri }
         requested_ref: { type: string }
         resolved_sha: { type: string, nullable: true, pattern: '^[0-9a-f]{40}$' }
-        state: { type: string, enum: [queued, ready, failed] }
+        state: { type: string, enum: [pending, ready, failed] }
+        sync_state: { type: string, enum: [idle, queued, running, failed] }
+        active_job_id: { type: string, nullable: true, format: uuid }
+        latest_job_id: { type: string, nullable: true, format: uuid }
+        last_successful_sync_at: { type: string, nullable: true, format: date-time }
         snapshot_path: { type: string, nullable: true }
         description: { type: string, nullable: true }
         last_error: { type: string, nullable: true }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    RepositoryUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [description, expected_description]
+      properties:
+        description: { type: string, nullable: true, maxLength: 500 }
+        expected_description: { type: string, nullable: true, maxLength: 500 }
     InventoryFile:
       type: object
       additionalProperties: false
@@ -630,6 +815,7 @@ components:
     ModuleRequirements:
       type: object
       additionalProperties: false
+      required: [required_roles, languages, include_globs, exclude_globs, requires_git_history, requires_full_repository]
       properties:
         required_roles:
           type: array
@@ -642,10 +828,23 @@ components:
         requires_full_repository: { type: boolean, default: false }
         max_files: { type: integer, nullable: true, minimum: 1 }
         max_bytes: { type: integer, nullable: true, minimum: 1 }
+      oneOf:
+        - properties:
+            requires_full_repository: { enum: [true] }
+            required_roles: { maxItems: 0 }
+            languages: { maxItems: 0 }
+            include_globs: { maxItems: 0 }
+            exclude_globs: { maxItems: 0 }
+        - properties:
+            requires_full_repository: { enum: [false] }
+          anyOf:
+            - properties: { required_roles: { minItems: 1 } }
+            - properties: { languages: { minItems: 1 } }
+            - properties: { include_globs: { minItems: 1 } }
     ModuleRegistrationRequest:
       type: object
       additionalProperties: false
-      required: [name, version, endpoint]
+      required: [name, version, endpoint, requirements]
       properties:
         name: { type: string, minLength: 1, maxLength: 128 }
         version: { type: string, minLength: 1 }
@@ -692,7 +891,7 @@ components:
     Run:
       type: object
       additionalProperties: false
-      required: [id, run_id, project_id, repository_id, module_id, analysis_id, module_snapshot, commit_sha, state, selected_files, selected_inputs, artifact_id, artifact_url, response_status, response_headers, response_body, error_code, error_message, duration_ms, created_at, updated_at]
+      required: [id, run_id, project_id, repository_id, module_id, analysis_id, result_sbom_id, module_snapshot, commit_sha, state, selected_files, selected_inputs, artifact_id, artifact_url, response_status, response_headers, response_body, error_code, error_message, duration_ms, started_at, finished_at, result_status, result_summary, result_errors, result_provenance, findings, output_artifacts, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         run_id: { type: string, format: uuid }
@@ -700,6 +899,7 @@ components:
         repository_id: { type: string, format: uuid }
         module_id: { type: string, format: uuid }
         analysis_id: { type: string, nullable: true, format: uuid }
+        result_sbom_id: { type: string, nullable: true, description: Exact normalized repository SBOM version produced by this run. }
         module_snapshot:
           type: object
           nullable: true
@@ -722,8 +922,198 @@ components:
         error_code: { type: string, nullable: true }
         error_message: { type: string, nullable: true }
         duration_ms: { type: integer, nullable: true, minimum: 0 }
+        started_at: { type: string, nullable: true, format: date-time }
+        finished_at: { type: string, nullable: true, format: date-time }
+        result_status: { type: string, nullable: true, enum: [completed, partial_success, failed], description: Module partial_success is a completed transport Run with non-fatal errors and is included in project last_analysis_at. }
+        result_summary: { type: object, nullable: true, additionalProperties: true }
+        result_errors: { type: array, nullable: true, items: { type: object, additionalProperties: true } }
+        result_provenance: { type: object, nullable: true, additionalProperties: true }
+        findings: { type: array, items: { type: object, additionalProperties: true } }
+        output_artifacts:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [artifact_id, kind, filename, media_type, sha256, size, download_url]
+            properties:
+              artifact_id: { type: string, format: uuid }
+              kind: { type: string }
+              filename: { type: string }
+              media_type: { type: string }
+              sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+              size: { type: integer, minimum: 0 }
+              download_url: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    SbomListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/SbomSummary' } }
+        total: { type: integer, minimum: 0 }
+    SbomSummary:
+      type: object
+      required: [id, project_id, repository_id, scope, format, status, generated_at, component_count, direct_dependency_count, transitive_dependency_count, dependency_depth, vulnerability_analysis_status]
+      properties:
+        id: { type: string }
+        project_id: { type: string, format: uuid }
+        repository_id: { type: string, nullable: true, format: uuid }
+        repository_name: { type: string, nullable: true }
+        scope: { type: string, enum: [project, repository] }
+        format: { type: string, enum: [cyclonedx, spdx] }
+        status: { type: string, enum: [completed, stale, running, failed] }
+        generated_at: { type: string, format: date-time }
+        component_count: { type: integer, minimum: 0 }
+        direct_dependency_count: { type: integer, minimum: 0 }
+        transitive_dependency_count: { type: integer, minimum: 0 }
+        dependency_depth: { type: integer, minimum: 0 }
+        vulnerability_analysis_status: { type: string, enum: [completed, not_run] }
+    Sbom:
+      allOf:
+        - $ref: '#/components/schemas/SbomSummary'
+        - type: object
+          required: [components, dependencies]
+          properties:
+            components: { type: array, items: { type: object } }
+            dependencies: { type: array, items: { type: object } }
+    VulnerabilityFinding:
+      type: object
+      required: [id, project_id, repository_id, repository_name, title, severity, status, component_purl, component_name, component_version, dependency_paths, sources, detected_at, updated_at]
+      properties:
+        id: { type: string }
+        project_id: { type: string }
+        repository_id: { type: string }
+        repository_name: { type: string }
+        cve_id: { type: string, nullable: true }
+        aliases: { type: array, items: { type: string } }
+        title: { type: string }
+        severity: { type: string, enum: [critical, high, medium, low] }
+        cvss_score: { type: number, nullable: true, minimum: 0, maximum: 10 }
+        status: { type: string, enum: [pending, confirmed, in_progress, fixed, false_positive, ignored] }
+        component_purl: { type: string }
+        component_name: { type: string }
+        component_version: { type: string }
+        affected_version_range: { type: string, nullable: true }
+        fixed_version: { type: string, nullable: true }
+        dependency_paths: { type: array, items: { type: object } }
+        sources: { type: array, items: { type: object } }
+        published_at: { type: string, nullable: true }
+        detected_at: { type: string, format: date-time }
+        remediation: { type: string, nullable: true }
+        risk_context: { type: object, nullable: true }
+        updated_at: { type: string, format: date-time }
+    VulnerabilityListResponse:
+      type: object
+      required: [scope, project_id, repository_id, analyzed_repository_ids, as_of, totals, vulnerabilities]
+      properties:
+        scope: { type: string, enum: [project] }
+        project_id: { type: string }
+        repository_id: { type: string, nullable: true }
+        analyzed_repository_ids: { type: array, items: { type: string } }
+        as_of: { type: string, format: date-time }
+        totals: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        vulnerabilities: { type: array, items: { $ref: '#/components/schemas/VulnerabilityFinding' } }
+    VulnerabilityDetail:
+      allOf:
+        - $ref: '#/components/schemas/VulnerabilityFinding'
+        - type: object
+          required: [affected_projects, timeline]
+          properties:
+            affected_projects: { type: array, items: { type: object } }
+            timeline: { type: array, items: { type: object } }
+    LicenseGovernanceResponse:
+      type: object
+      required: [scope, project_id, repository_id, analyzed_repository_ids, as_of, components, totals, conflicts]
+      properties:
+        scope: { type: string, enum: [project] }
+        project_id: { type: string }
+        repository_id: { type: string, nullable: true }
+        analyzed_repository_ids: { type: array, items: { type: string } }
+        as_of: { type: string, format: date-time }
+        components: { type: array, items: { type: object } }
+        totals: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        conflicts: { type: array, items: { type: object } }
+    LicenseResolution:
+      type: object
+      required: [conflict_id, repository_id, repository_name, recommendations]
+      properties:
+        conflict_id: { type: string }
+        repository_id: { type: string }
+        repository_name: { type: string }
+        recommendations: { type: array, items: { type: object } }
+    CoverageMetric:
+      type: object
+      required: [evaluated, total, percent]
+      properties:
+        evaluated: { type: integer, minimum: 0 }
+        total: { type: integer, minimum: 0 }
+        percent: { type: number, minimum: 0, maximum: 100 }
+    HealthTrendPoint:
+      type: object
+      required: [period, health_score, open_vulnerabilities, fixed_vulnerabilities, fix_rate]
+      properties:
+        period: { type: string, pattern: '^\\d{4}-\\d{2}$' }
+        health_score: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        open_vulnerabilities: { type: integer, minimum: 0 }
+        fixed_vulnerabilities: { type: integer, minimum: 0 }
+        fix_rate: { type: number, minimum: 0, maximum: 1 }
+    MaintainerHealth:
+      type: object
+      required: [scope, project_id, repository_id, assessment_status, active_contributors, median_issue_response_hours, maintainers]
+      properties:
+        scope: { type: string, enum: [project, repository] }
+        project_id: { type: string }
+        repository_id: { type: string, nullable: true }
+        assessment_status: { type: string, enum: [available, not_available] }
+        active_contributors: { type: integer, nullable: true, minimum: 0 }
+        median_issue_response_hours: { type: number, nullable: true, minimum: 0 }
+        maintainers: { type: array, items: { type: object } }
+    HealthProject:
+      type: object
+      required: [id, name, repository_id, repository_count, health_score, lifecycle_status, attention, open_vulnerabilities, license_conflicts, last_scan_at, maintainer_activity, alerts, score_breakdown, evaluation_scope]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        repository_id: { type: string, nullable: true }
+        repository_count: { type: integer, minimum: 0 }
+        health_score: { type: number, nullable: true, minimum: 0, maximum: 100 }
+        lifecycle_status: { type: string, enum: [active, archived] }
+        attention: { type: string, enum: [healthy, attention, insufficient_data] }
+        open_vulnerabilities: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+        license_conflicts: { type: integer, minimum: 0 }
+        last_scan_at: { type: string, nullable: true, format: date-time }
+        maintainer_activity: { type: object, additionalProperties: true }
+        alerts: { type: array, items: { type: string } }
+        score_breakdown: { type: object, additionalProperties: true }
+        evaluation_scope: { type: object, additionalProperties: true }
+    DashboardOverview:
+      type: object
+      required: [scope, project_id, repository_id, as_of, coverage_percent, coverage, active_projects, open_risks, critical_risks, license_conflicts, scans_in_progress, projects, vulnerability_trend]
+      properties:
+        scope: { type: string, enum: [portfolio, project, repository] }
+        project_id: { type: string, nullable: true }
+        repository_id: { type: string, nullable: true }
+        as_of: { type: string, format: date-time }
+        coverage_percent: { type: number, minimum: 0, maximum: 100, description: Complete SBOM+vulnerability+license intersection coverage. }
+        sbom_coverage_percent: { type: number, minimum: 0, maximum: 100 }
+        vulnerability_coverage_percent: { type: number, minimum: 0, maximum: 100 }
+        license_coverage_percent: { type: number, minimum: 0, maximum: 100 }
+        complete_assessment_coverage_percent: { type: number, minimum: 0, maximum: 100 }
+        coverage:
+          type: object
+          required: [sbom, vulnerability, license, complete]
+          properties:
+            sbom: { $ref: '#/components/schemas/CoverageMetric' }
+            vulnerability: { $ref: '#/components/schemas/CoverageMetric' }
+            license: { $ref: '#/components/schemas/CoverageMetric' }
+            complete: { $ref: '#/components/schemas/CoverageMetric' }
+        active_projects: { type: integer, minimum: 0 }
+        open_risks: { type: integer, minimum: 0 }
+        critical_risks: { type: integer, minimum: 0 }
+        license_conflicts: { type: integer, minimum: 0 }
+        scans_in_progress: { type: integer, minimum: 0 }
+        projects: { type: array, items: { $ref: '#/components/schemas/HealthProject' } }
+        vulnerability_trend: { type: array, items: { $ref: '#/components/schemas/HealthTrendPoint' } }
     Event:
       type: object
       additionalProperties: false
@@ -739,3 +1129,13 @@ components:
         progress: { type: integer, minimum: 0, maximum: 100 }
         stage: { type: string }
         message: { type: string, nullable: true }
+  securitySchemes:
+    trustedIntegration:
+      type: apiKey
+      in: header
+      name: X-Authenticated-Subject
+      description: >-
+        External identity header used only when AUTH_MODE=trusted_integration.
+        Requests also need X-Project-Grants containing the authorized project
+        IDs (or * for an explicitly trusted global scope). These headers are an
+        integration boundary, not a production identity implementation.

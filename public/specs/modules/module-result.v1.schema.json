@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://oss-funder.example/contracts/modules/module-result.v1.schema.json",
-  "title": "OSS-Funder module result v1 (approved contract; implementation pending)",
-  "description": "Approved version 1 synchronous HTTP JSON result contract. The current Rust backend does not yet validate or interpret this schema: today a 2xx response is recorded as completed and its bounded body is stored. V1 accepts only inline artifact delivery. The complete HTTP response body, including JSON and base64 overhead, is limited to 16 MiB; an oversized response must fail rather than be truncated. Larger delivery methods are reserved for a later contract version. A partial_success result must contain at least one valid finding or artifact and at least one non-fatal error describing an uncovered or incomplete portion; it is not a completely failed run.",
+  "title": "OSS-Funder module result v1",
+  "description": "Approved version 1 synchronous HTTP JSON result contract. The backend validates the complete response before persisting it. V1 accepts only inline artifact delivery. The complete HTTP response body, including JSON and base64 overhead, is limited to 16 MiB; an oversized response fails rather than being truncated. Larger delivery methods are reserved for a later contract version. A partial_success result must contain at least one valid finding or artifact and at least one non-fatal error describing an uncovered or incomplete portion; it is not a completely failed run.",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract_version", "run_id", "status", "summary", "findings", "artifacts", "errors"],

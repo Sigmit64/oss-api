@@ -19,6 +19,7 @@ npm run test:site
 
 ```bash
 npm run sync-specs -- --source /mnt/e/thu/4-1/backend/contracts
+npm run check-drift
 npm run validate-specs
 ```
 
@@ -33,4 +34,4 @@ npm run validate-specs
 - `CURRENT`：当前后端已经实现的 OpenAPI 接口。
 - `module-invocation.v1.schema.json`：`CURRENT`，当前实现使用的模块调用输入契约。
 - `module-registration.v1.schema.json`：`TARGET`，已冻结但选择器交叉规则仍待后端实现的模块注册契约。
-- `module-result.v1.schema.json`：`TARGET`，已批准但当前后端尚未校验或解释的模块结果契约。
+- `module-result.v1.schema.json`：`CURRENT`，后端运行时校验并持久化规范化结果、发现和内联输出制品。
