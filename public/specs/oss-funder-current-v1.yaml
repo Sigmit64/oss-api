@@ -794,47 +794,200 @@ paths:
         '503': { $ref: '#/components/responses/Unavailable' }
   /projects/{project_id}/reports:
     parameters:
-      - { $ref: '#/components/parameters/ProjectId' }
+      - name: project_id
+        in: path
+        required: true
+        schema: { type: string }
     get:
       operationId: listProjectReports
-      summary: List historical reports for the four fixed analysis capabilities
+      summary: List immutable analysis reports for one project
+      description: |
+        Reports are generated automatically from completed analysis tasks and cannot
+        be created, edited, or deleted through this API. The state only describes
+        report artifact generation. Repository coverage is reported separately, so
+        a completed report may still have missing repositories and must show that
+        limitation to the user. Results are ordered by created_at descending and then
+        by id descending. Each report contains evidence from its own analysis type only;
+        cross-module evidence is not merged into the report. Re-running an analysis
+        creates a new report and new artifacts; an existing report snapshot and its
+        stored bytes must never be overwritten.
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string, enum: [sbom, vulnerability, license, health] }
+        - name: state
+          in: query
+          schema: { type: string, enum: [generating, completed, failed] }
+        - name: trigger
+          in: query
+          description: How the source analysis task was started, not how the report renderer ran.
+          schema: { type: string, enum: [manual, scheduled] }
+        - name: q
+          in: query
+          description: Case-insensitive search across report title, report number, snapshot ID, and analysis ID.
+          schema: { type: string, maxLength: 200 }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
       responses:
         '200':
-          description: Historical reports
+          description: Filtered report page and unfiltered counts for the four report tabs
           content:
             application/json:
-              schema: { type: array, items: { $ref: '#/components/schemas/ProjectReport' } }
+              schema: { $ref: '#/components/schemas/ReportListResponse' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /projects/{project_id}/reports/{report_id}:
     parameters:
-      - { $ref: '#/components/parameters/ProjectId' }
       - name: report_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: project_id
         in: path
         required: true
         schema: { type: string }
     get:
       operationId: getProjectReport
-      summary: Get one historical report and its evidence references
+      summary: Get one immutable report snapshot
       responses:
         '200':
-          description: Historical report
+          description: Report metadata, evidence, coverage, and downloadable artifacts
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ProjectReport' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /projects/{project_id}/reports/{report_id}/result:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: report_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getProjectReportResult
+      summary: Get the immutable full analysis result frozen with one report
+      description: |
+        Returns the complete type-specific result snapshot displayed by the read-only
+        report result page. The payload is bound to report_id and snapshot_id and must
+        not reflect later vulnerability or license governance changes. This resource is
+        read-only; governance mutations remain available only on the current-result pages.
+      responses:
+        '200':
+          description: Immutable analysis result snapshot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportResultSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The report exists but no result snapshot was formed
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /projects/{project_id}/reports/{report_id}/artifacts/{artifact_id}/download:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: report_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: artifact_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: downloadReportArtifact
+      summary: Download one report artifact
+      description: |
+        The artifact must belong to the requested project and report. The server sets
+        Content-Type and Content-Disposition from the stored artifact metadata. Artifact
+        bytes are immutable and must match the SHA-256 value returned by ProjectReport.
+      responses:
+        '200':
+          description: PDF report, JSON analysis result, or ZIP evidence package
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/json:
+              schema: { type: object, additionalProperties: true }
+            application/zip:
+              schema: { type: string, format: binary }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /projects/{project_id}/audit-records:
     parameters:
-      - { $ref: '#/components/parameters/ProjectId' }
+      - name: project_id
+        in: path
+        required: true
+        schema: { type: string }
     get:
       operationId: listProjectAuditRecords
-      summary: List immutable project audit records
-      description: Audit records cover state-changing project, repository, vulnerability, license, report and review actions; ordinary analysis progress is not an audit record.
+      summary: List append-only governance audit records
+      description: |
+        Audit records are written by the backend in the same transaction as a governance
+        change or a failed governance command. Ordinary analysis execution, report
+        generation, and repository synchronization belong to operational history and are
+        not returned here. Audit records cannot be created, edited, or deleted by clients.
+        Results are ordered by occurred_at descending and then by id descending. Actor,
+        changes, request ID, result, and error code are derived by the backend and never
+        accepted from the browser as audit payload.
+      parameters:
+        - name: result
+          in: query
+          schema: { type: string, enum: [succeeded, failed] }
+        - name: category
+          in: query
+          schema: { type: string, enum: [project, repository, vulnerability, license, review] }
+        - name: q
+          in: query
+          description: Case-insensitive search across action type, actor, subject, request ID, and message.
+          schema: { type: string, maxLength: 200 }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
       responses:
         '200':
-          description: Audit records
+          description: Filtered audit page with project-wide summary counters
           content:
             application/json:
-              schema: { type: array, items: { $ref: '#/components/schemas/AuditRecord' } }
+              schema: { $ref: '#/components/schemas/AuditListResponse' }
+        '400': { $ref: '#/components/responses/InvalidRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /projects/{project_id}/audit-records/{audit_record_id}:
+    parameters:
+      - name: project_id
+        in: path
+        required: true
+        schema: { type: string }
+      - name: audit_record_id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getProjectAuditRecord
+      summary: Get one immutable governance audit record
+      description: |
+        Returns the complete server-generated record, including all before/after values,
+        actor identity, request trace, failure information, and integrity hash. The record
+        must belong to the requested project and remains read-only.
+      responses:
+        '200':
+          description: Complete audit record for detail display and traceability
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditRecord' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
   /projects/{project_id}/activities:
     parameters:
@@ -1766,8 +1919,22 @@ components:
         scans_in_progress: { type: integer, minimum: 0 }
         projects: { type: array, items: { $ref: '#/components/schemas/HealthProject' } }
         vulnerability_trend: { type: array, items: { $ref: '#/components/schemas/HealthTrendPoint' } }
+    ReportArtifact:
+      type: object
+      additionalProperties: false
+      required: [id, kind, format, filename, media_type, size_bytes, sha256, download_url]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [report, analysis_result, evidence_package] }
+        format: { type: string, enum: [pdf, json, zip] }
+        filename: { type: string }
+        media_type: { type: string }
+        size_bytes: { type: integer, minimum: 0 }
+        sha256: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
+        download_url: { type: string, format: uri-reference }
     ReportEvidence:
       type: object
+      additionalProperties: false
       required: [id, kind, name, repository_id, repository_name, commit_sha, analysis_id, captured_at, integrity]
       properties:
         id: { type: string }
@@ -1779,74 +1946,232 @@ components:
         analysis_id: { type: [string, 'null'] }
         captured_at: { type: string, format: date-time }
         integrity: { type: [string, 'null'] }
+    SbomReportCoreSummary:
+      type: object
+      required: [type, identified_components, direct_dependencies, indirect_dependencies, package_ecosystems]
+      properties:
+        type: { type: string, enum: [sbom] }
+        identified_components: { type: integer, minimum: 0 }
+        direct_dependencies: { type: integer, minimum: 0 }
+        indirect_dependencies: { type: integer, minimum: 0 }
+        package_ecosystems: { type: integer, minimum: 0 }
+    VulnerabilityReportCoreSummary:
+      type: object
+      required: [type, current_vulnerabilities, critical_high_vulnerabilities, fix_available_vulnerabilities, affected_components]
+      properties:
+        type: { type: string, enum: [vulnerability] }
+        current_vulnerabilities: { type: integer, minimum: 0 }
+        critical_high_vulnerabilities: { type: integer, minimum: 0 }
+        fix_available_vulnerabilities: { type: integer, minimum: 0 }
+        affected_components: { type: integer, minimum: 0 }
+    LicenseReportCoreSummary:
+      type: object
+      required: [type, identified_components, unresolved_conflicts, blocked_components, unidentified_components]
+      properties:
+        type: { type: string, enum: [license] }
+        identified_components: { type: integer, minimum: 0 }
+        unresolved_conflicts: { type: integer, minimum: 0 }
+        blocked_components: { type: integer, minimum: 0 }
+        unidentified_components: { type: integer, minimum: 0 }
+    HealthReportCoreSummary:
+      type: object
+      required: [type, collected_metrics, attention_metrics, unavailable_metrics, measured_repositories]
+      properties:
+        type: { type: string, enum: [health] }
+        collected_metrics: { type: integer, minimum: 0 }
+        attention_metrics: { type: integer, minimum: 0 }
+        unavailable_metrics: { type: integer, minimum: 0 }
+        measured_repositories: { type: integer, minimum: 0 }
+    ReportCoreSummary:
+      oneOf:
+        - { $ref: '#/components/schemas/SbomReportCoreSummary' }
+        - { $ref: '#/components/schemas/VulnerabilityReportCoreSummary' }
+        - { $ref: '#/components/schemas/LicenseReportCoreSummary' }
+        - { $ref: '#/components/schemas/HealthReportCoreSummary' }
+      discriminator: { propertyName: type }
+    ReportResultSnapshotBase:
+      type: object
+      required: [report_id, project_id, snapshot_id, generated_at]
+      properties:
+        report_id: { type: string }
+        project_id: { type: string }
+        snapshot_id: { type: string }
+        generated_at: { type: string, format: date-time }
+    SbomReportResultSnapshot:
+      allOf:
+        - { $ref: '#/components/schemas/ReportResultSnapshotBase' }
+        - type: object
+          required: [type, sboms]
+          properties:
+            type: { type: string, enum: [sbom] }
+            sboms: { type: array, items: { $ref: '#/components/schemas/Sbom' } }
+    VulnerabilityReportResultSnapshot:
+      allOf:
+        - { $ref: '#/components/schemas/ReportResultSnapshotBase' }
+        - type: object
+          required: [type, as_of, analyzed_repository_ids, findings]
+          properties:
+            type: { type: string, enum: [vulnerability] }
+            as_of: { type: string, format: date-time }
+            analyzed_repository_ids: { type: array, items: { type: string } }
+            findings: { type: array, items: { $ref: '#/components/schemas/VulnerabilityDetail' } }
+    LicenseReportResultSnapshot:
+      allOf:
+        - { $ref: '#/components/schemas/ReportResultSnapshotBase' }
+        - type: object
+          required: [type, as_of, analyzed_repository_ids, components, conflicts, resolutions]
+          properties:
+            type: { type: string, enum: [license] }
+            as_of: { type: string, format: date-time }
+            analyzed_repository_ids: { type: array, items: { type: string } }
+            components: { type: array, items: { $ref: '#/components/schemas/LicenseFinding' } }
+            conflicts: { type: array, items: { $ref: '#/components/schemas/LicenseConflict' } }
+            resolutions: { type: object, additionalProperties: { $ref: '#/components/schemas/LicenseResolution' } }
+    HealthReportResultSnapshot:
+      allOf:
+        - { $ref: '#/components/schemas/ReportResultSnapshotBase' }
+        - type: object
+          required: [type, project, activities]
+          properties:
+            type: { type: string, enum: [health] }
+            project: { $ref: '#/components/schemas/HealthProject' }
+            activities: { type: array, items: { $ref: '#/components/schemas/ProjectActivityRecord' } }
+    ReportResultSnapshot:
+      oneOf:
+        - { $ref: '#/components/schemas/SbomReportResultSnapshot' }
+        - { $ref: '#/components/schemas/VulnerabilityReportResultSnapshot' }
+        - { $ref: '#/components/schemas/LicenseReportResultSnapshot' }
+        - { $ref: '#/components/schemas/HealthReportResultSnapshot' }
+      discriminator:
+        propertyName: type
+        mapping:
+          sbom: '#/components/schemas/SbomReportResultSnapshot'
+          vulnerability: '#/components/schemas/VulnerabilityReportResultSnapshot'
+          license: '#/components/schemas/LicenseReportResultSnapshot'
+          health: '#/components/schemas/HealthReportResultSnapshot'
+    ReportCoverage:
+      type: object
+      required: [total_repository_count, included_repository_count, missing_repository_count]
+      properties:
+        total_repository_count: { type: integer, minimum: 0 }
+        included_repository_count: { type: integer, minimum: 0 }
+        missing_repository_count: { type: integer, minimum: 0 }
+    ReportDataWindow:
+      type: object
+      required: [started_at, ended_at]
+      properties:
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time }
     ProjectReport:
       type: object
-      required: [id, project_id, report_number, report_version, title, type, state, trigger, snapshot_id, data_window, coverage, rule_version, scanner_version, content_hash, file_hash, formats, created_by, created_at, generated_at, repository_count, analysis_count, evidence_count, summary, error_message, download_url, evidence_package_url, evidence]
+      additionalProperties: false
+      required: [id, project_id, report_number, template_version, title, type, state, trigger, analysis_id, snapshot_id, data_window, coverage, rule_version, scanner_version, result_sha256, initiated_by, created_at, generated_at, repository_count, analysis_count, evidence_count, summary, core_summary, error_code, error_message, artifacts, evidence]
       properties:
         id: { type: string }
         project_id: { type: string }
         report_number: { type: string }
-        report_version: { type: string }
+        template_version: { type: string }
         title: { type: string }
         type: { type: string, enum: [sbom, vulnerability, license, health] }
-        state: { type: string, enum: [generating, completed, partial, failed] }
-        trigger: { type: string, enum: [analysis_completed, scheduled, acceptance] }
+        state: { type: string, enum: [generating, completed, failed] }
+        trigger: { type: string, enum: [manual, scheduled] }
+        analysis_id: { type: string }
         snapshot_id: { type: string }
         data_window:
           oneOf:
-            - type: object
-              required: [started_at, ended_at]
-              properties:
-                started_at: { type: string, format: date-time }
-                ended_at: { type: string, format: date-time }
+            - { $ref: '#/components/schemas/ReportDataWindow' }
             - { type: 'null' }
-        coverage:
-          type: object
-          required: [total_repository_count, included_repository_count, missing_repository_count]
-          properties:
-            total_repository_count: { type: integer, minimum: 0 }
-            included_repository_count: { type: integer, minimum: 0 }
-            missing_repository_count: { type: integer, minimum: 0 }
+        coverage: { $ref: '#/components/schemas/ReportCoverage' }
         rule_version: { type: [string, 'null'] }
         scanner_version: { type: [string, 'null'] }
-        content_hash: { type: [string, 'null'] }
-        file_hash: { type: [string, 'null'] }
-        formats: { type: array, items: { type: string, enum: [pdf, json] } }
-        created_by: { type: string }
+        result_sha256: { type: [string, 'null'], pattern: '^[a-fA-F0-9]{64}$' }
+        initiated_by: { type: string }
         created_at: { type: string, format: date-time }
         generated_at: { type: [string, 'null'], format: date-time }
         repository_count: { type: integer, minimum: 0 }
         analysis_count: { type: integer, minimum: 0 }
         evidence_count: { type: integer, minimum: 0 }
         summary: { type: [string, 'null'] }
+        core_summary:
+          oneOf:
+            - { $ref: '#/components/schemas/ReportCoreSummary' }
+            - { type: 'null' }
+        error_code: { type: [string, 'null'] }
         error_message: { type: [string, 'null'] }
-        download_url: { type: [string, 'null'], format: uri-reference }
-        evidence_package_url: { type: [string, 'null'], format: uri-reference }
+        artifacts: { type: array, items: { $ref: '#/components/schemas/ReportArtifact' } }
         evidence: { type: array, items: { $ref: '#/components/schemas/ReportEvidence' } }
+    ReportTypeCounts:
+      type: object
+      required: [sbom, vulnerability, license, health]
+      properties:
+        sbom: { type: integer, minimum: 0 }
+        vulnerability: { type: integer, minimum: 0 }
+        license: { type: integer, minimum: 0 }
+        health: { type: integer, minimum: 0 }
+    ReportListResponse:
+      type: object
+      required: [items, page, page_size, total, type_counts]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/ProjectReport' } }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, minimum: 0 }
+        type_counts: { $ref: '#/components/schemas/ReportTypeCounts' }
+    AuditActor:
+      type: object
+      required: [id, display_name, type]
+      properties:
+        id: { type: [string, 'null'] }
+        display_name: { type: string }
+        type: { type: string, enum: [user, system] }
+    AuditChange:
+      type: object
+      required: [field, before, after]
+      properties:
+        field:
+          type: string
+          enum: [project_name, project_description, project_owner, project_status, repository_note, finding_status, license_conclusion, license_conflict_status, release_policy, remediation_requirement, review_dimension_scores, review_final_score, review_decision, review_recommendation]
+        before: { type: [string, 'null'] }
+        after: { type: [string, 'null'] }
     AuditRecord:
       type: object
-      required: [id, project_id, occurred_at, actor, action, category, result, subject_type, subject_id, subject_label, request_id, message, change]
+      additionalProperties: false
+      required: [id, project_id, occurred_at, actor, action_type, category, result, subject_type, subject_id, subject_label, request_id, message, error_code, changes, record_hash]
       properties:
         id: { type: string }
         project_id: { type: string }
         occurred_at: { type: string, format: date-time }
-        actor: { type: string }
-        action: { type: string }
-        category: { type: string, enum: [project, repository, analysis, vulnerability, license, report, review] }
-        result: { type: string, enum: [completed, failed] }
-        subject_type: { type: string, enum: [project, repository, analysis, report, finding, review] }
+        actor: { $ref: '#/components/schemas/AuditActor' }
+        action_type:
+          type: string
+          enum: [project.created, project.updated, project.archived, project.restored, repository.connected, repository.note_updated, repository.removed, vulnerability.status_changed, license.conclusion_changed, license.conflict_status_changed, license.release_policy_changed, license.remediation_updated, license.conflict_archived, review.saved]
+        category: { type: string, enum: [project, repository, vulnerability, license, review] }
+        result: { type: string, enum: [succeeded, failed] }
+        subject_type: { type: string, enum: [project, repository, finding, review] }
         subject_id: { type: string }
         subject_label: { type: string }
         request_id: { type: string }
         message: { type: [string, 'null'] }
-        change:
-          oneOf:
-            - type: object
-              required: [before, after]
-              properties:
-                before: { type: [string, 'null'] }
-                after: { type: [string, 'null'] }
-            - { type: 'null' }
+        error_code: { type: [string, 'null'] }
+        changes: { type: array, items: { $ref: '#/components/schemas/AuditChange' } }
+        record_hash: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
+    AuditSummary:
+      type: object
+      required: [total, vulnerabilities, licenses, failed]
+      properties:
+        total: { type: integer, minimum: 0 }
+        vulnerabilities: { type: integer, minimum: 0 }
+        licenses: { type: integer, minimum: 0 }
+        failed: { type: integer, minimum: 0 }
+    AuditListResponse:
+      type: object
+      required: [items, page, page_size, total, summary]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/AuditRecord' } }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 100 }
+        total: { type: integer, minimum: 0 }
+        summary: { $ref: '#/components/schemas/AuditSummary' }
     ProjectActivityRecord:
       type: object
       required: [id, project_id, repository_id, repository_name, provider, kind, title, actor, occurred_at, commit_sha, pull_request_number, external_url]
